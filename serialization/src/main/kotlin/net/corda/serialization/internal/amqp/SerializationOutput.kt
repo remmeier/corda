@@ -51,7 +51,6 @@ open class SerializationOutput @JvmOverloads constructor(
             return _serialize(obj, context)
         } catch (amqp: AMQPNotSerializableException) {
             amqp.log("Serialize", logger)
-            amqp.printStackTrace()
             throw NotSerializableException(amqp.mitigation)
         } finally {
             andFinally()
