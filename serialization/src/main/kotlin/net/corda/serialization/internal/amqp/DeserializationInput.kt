@@ -102,7 +102,7 @@ class DeserializationInput @JvmOverloads constructor(
         } catch (nse: NotSerializableException) {
             throw nse
         } catch (t: Throwable) {
-            throw NotSerializableException("Unexpected throwable: ${t.message}").apply { initCause(t) }
+            throw NotSerializableException("Internal deserialization failure: ${t.javaClass.name}: ${t.message}").apply { initCause(t) }
         } finally {
             objectHistory.clear()
         }
