@@ -14,7 +14,7 @@ import net.corda.core.utilities.OpaqueBytes
 import net.corda.core.utilities.Try
 import org.apache.activemq.artemis.api.core.ActiveMQBuffer
 import org.apache.activemq.artemis.api.core.SimpleString
-import org.apache.activemq.artemis.api.core.client.*
+import org.apache.activemq.artemis.api.core.client.ClientMessage
 import org.apache.activemq.artemis.api.core.management.CoreNotificationType
 import org.apache.activemq.artemis.api.core.management.ManagementHelper
 import org.apache.activemq.artemis.reader.MessageUtil
@@ -188,7 +188,7 @@ object RPCApi {
          */
         data class RpcReply(
                 val id: InvocationId,
-                val result: Try<Any?>,
+                val result: Try<Try<Any?>>,
                 override val deduplicationIdentity: String
         ) : ServerToClient() {
             override fun writeToClientMessage(context: SerializationContext, message: ClientMessage) {
@@ -229,7 +229,9 @@ object RPCApi {
                         RpcReply(
                                 id = id,
                                 deduplicationIdentity = deduplicationIdentity,
-                                result = message.getBodyAsByteArray().deserialize(context = poolWithIdContext)
+                                // This is a bit weird - we end up with a NESTED Try here. The outer Try represents
+                                // deserialization errors. The inner Try is the result of trying to invoke the RPC.
+                                result = Try.on { message.getBodyAsByteArray().deserialize<Try<Any?>>(context = poolWithIdContext) }
                         )
                     }
                     RPCApi.ServerToClient.Tag.OBSERVATION -> {

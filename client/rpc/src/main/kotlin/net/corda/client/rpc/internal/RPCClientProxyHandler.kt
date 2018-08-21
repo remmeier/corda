@@ -31,26 +31,15 @@ import org.apache.activemq.artemis.api.core.ActiveMQException
 import org.apache.activemq.artemis.api.core.ActiveMQNotConnectedException
 import org.apache.activemq.artemis.api.core.RoutingType
 import org.apache.activemq.artemis.api.core.SimpleString
+import org.apache.activemq.artemis.api.core.client.*
 import org.apache.activemq.artemis.api.core.client.ActiveMQClient.DEFAULT_ACK_BATCH_SIZE
-import org.apache.activemq.artemis.api.core.client.ClientConsumer
-import org.apache.activemq.artemis.api.core.client.ClientMessage
-import org.apache.activemq.artemis.api.core.client.ClientProducer
-import org.apache.activemq.artemis.api.core.client.ClientSession
-import org.apache.activemq.artemis.api.core.client.ClientSessionFactory
-import org.apache.activemq.artemis.api.core.client.FailoverEventType
-import org.apache.activemq.artemis.api.core.client.ServerLocator
 import rx.Notification
 import rx.Observable
 import rx.subjects.UnicastSubject
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledExecutorService
-import java.util.concurrent.ScheduledFuture
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.reflect.jvm.javaMethod
@@ -301,7 +290,11 @@ class RPCClientProxyHandler(
                 if (replyFuture == null) {
                     log.error("RPC reply arrived to unknown RPC ID ${serverToClient.id}, this indicates an internal RPC error.")
                 } else {
-                    val result = serverToClient.result
+                    // The result field is a nested Try<Try<*>> - the outer try holds reply deserialization failures,
+                    // the inner try holds the server-side result of attempting to run the RPC. For reporting a failure
+                    // back via the future, we don't care where exactly it failed, so we just use flatMap here to
+                    // squash the two Trys together.
+                    val result: Try<Any?> = serverToClient.result.flatMap { it }
                     when (result) {
                         is Try.Success -> replyFuture.set(result.value)
                         is Try.Failure -> {
