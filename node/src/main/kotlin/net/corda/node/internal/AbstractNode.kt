@@ -28,6 +28,7 @@ import net.corda.core.schemas.MappedSchema
 import net.corda.core.serialization.SerializationWhitelist
 import net.corda.core.serialization.SerializeAsToken
 import net.corda.core.serialization.SingletonSerializeAsToken
+import net.corda.core.serialization.internal.CorDappsClassLoaderHolder
 import net.corda.core.utilities.NetworkHostAndPort
 import net.corda.core.utilities.days
 import net.corda.core.utilities.getOrThrow
@@ -146,7 +147,11 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
         }
     }
 
-    val cordappLoader: CordappLoader = makeCordappLoader(configuration, versionInfo).closeOnStop()
+    val cordappLoader: CordappLoader = makeCordappLoader(configuration, versionInfo).also {
+        // Mighty unclean, but we need a quick stopgap to the bug it's addressing.
+        // TODO Remove ASAP after proper handling of dependent CorDapps with regards to attachments.
+        CorDappsClassLoaderHolder.set(it.appClassLoader)
+    }.closeOnStop()
     val schemaService = NodeSchemaService(cordappLoader.cordappSchemas).tokenize()
     val identityService = PersistentIdentityService(cacheFactory).tokenize()
     val database: CordaPersistence = createCordaPersistence(
@@ -1118,7 +1123,8 @@ fun createCordaPersistence(databaseConfig: DatabaseConfig,
     // either Hibernate can be convinced to stop warning, use the descriptor by default, or something else.
     JavaTypeDescriptorRegistry.INSTANCE.addDescriptor(AbstractPartyDescriptor(wellKnownPartyFromX500Name, wellKnownPartyFromAnonymous))
     val attributeConverters = listOf(PublicKeyToTextConverter(), AbstractPartyToX500NameAsStringConverter(wellKnownPartyFromX500Name, wellKnownPartyFromAnonymous))
-    val jdbcUrl = hikariProperties.getProperty("dataSource.url", "")
+    val jdbcUrl = hikariProperties.getProperty("dataSource.url", hikariProperties.getProperty("jdbcUrl", ""))
+
     return CordaPersistence(databaseConfig, schemaService.schemaOptions.keys, jdbcUrl, cacheFactory, attributeConverters, customClassLoader)
 }
 

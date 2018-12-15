@@ -26,7 +26,7 @@ import java.net.*
  * AttachmentsClassLoader is somewhat expensive, as every attachment is scanned to ensure that there are no overlapping
  * file paths.
  */
-class AttachmentsClassLoader(attachments: List<Attachment>, parent: ClassLoader = ClassLoader.getSystemClassLoader()) :
+class AttachmentsClassLoader(attachments: List<Attachment>, parent: ClassLoader? = ClassLoader.getSystemClassLoader()) :
         URLClassLoader(attachments.map(::toUrl).toTypedArray(), parent) {
 
     init {
@@ -129,6 +129,15 @@ class AttachmentsClassLoader(attachments: List<Attachment>, parent: ClassLoader 
     }
 }
 
+// Mighty unclean, but we need a quick stopgap to the bug it's addressing.
+// TODO Remove ASAP after proper handling of dependent CorDapps with regards to attachments.
+object CorDappsClassLoaderHolder {
+    var instance: ClassLoader? = null
+    fun set(instance: ClassLoader) {
+        this.instance = instance
+    }
+}
+
 /**
  * This is just a factory that provides a cache to avoid constructing expensive [AttachmentsClassLoader]s.
  */
@@ -141,16 +150,24 @@ internal object AttachmentsClassLoaderBuilder {
     private val cache: MutableMap<List<SecureHash>, AttachmentsClassLoader> = createSimpleCache<List<SecureHash>, AttachmentsClassLoader>(ATTACHMENT_CLASSLOADER_CACHE_SIZE)
             .toSynchronised()
 
-    fun build(attachments: List<Attachment>): AttachmentsClassLoader {
+    fun build(attachments: List<Attachment>, parent: ClassLoader? = ClassLoader.getSystemClassLoader()): AttachmentsClassLoader {
         return cache.computeIfAbsent(attachments.map { it.id }.sorted()) {
-            AttachmentsClassLoader(attachments)
+            AttachmentsClassLoader(attachments, parent)
         }
     }
 
     fun <T> withAttachmentsClassloaderContext(attachments: List<Attachment>, block: (ClassLoader) -> T): T {
-
         // Create classloader from the attachments.
-        val transactionClassLoader = AttachmentsClassLoaderBuilder.build(attachments)
+        // TODO This should not default to the CorDapps classloader, but it's needed for now to stop a bug preventing CorDapps with dependencies on other CorDapps from working as attachments.
+        // TODO A proper fix would require gathering information about dependent CorDapps with hashes at build time, and importing these as attachments as well.
+        // This doesn't work!
+//        val cordappsClassLoader = CorDappsClassLoaderHolder.instance
+//        val attachmentsClassLoader = AttachmentsClassLoaderBuilder.build(attachments)
+//        val transactionClassLoader = cordappsClassLoader?.let { CascadingClassLoader(sequenceOf(attachmentsClassLoader, it)) } ?: attachmentsClassLoader
+
+        val cordappsClassLoader = CorDappsClassLoaderHolder.instance
+        // Here we could use a try-catch to attempt the operation with the original AttachmentsClassLoader, then try again with the cascade.
+        val transactionClassLoader = AttachmentsClassLoaderBuilder.build(attachments, cordappsClassLoader)
 
         // Create a new serializationContext for the current Transaction.
         val transactionSerializationContext = SerializationFactory.defaultFactory.defaultContext.withPreventDataLoss().withClassLoader(transactionClassLoader)
@@ -159,6 +176,31 @@ internal object AttachmentsClassLoaderBuilder {
         return SerializationFactory.defaultFactory.withCurrentContext(transactionSerializationContext) {
             block(transactionClassLoader)
         }
+    }
+}
+
+private class CascadingClassLoader(classLoaders: Sequence<ClassLoader>, parent: ClassLoader = ClassLoader.getSystemClassLoader()) : ClassLoader(parent) {
+    private val classLoaders = classLoaders.toList()
+
+    override fun loadClass(name: String): Class<*> {
+        for (classLoader in classLoaders) {
+            try {
+                return classLoader.loadClass(name)
+            } catch (e: ClassNotFoundException) {
+                // Keep iterating without failing.
+            }
+        }
+        return super.loadClass(name)
+    }
+
+    override fun getResource(name: String): URL? {
+        for (classLoader in classLoaders) {
+            val url = classLoader.getResource(name)
+            if (url != null) {
+                return url
+            }
+        }
+        return super.getResource(name)
     }
 }
 

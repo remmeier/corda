@@ -419,6 +419,7 @@ interface NodeStartupLogging {
     fun Throwable.isExpectedWhenStartingNode() = startupErrors.any { error -> error.isInstance(this) }
 
     fun handleStartError(error: Throwable) {
+        error.printStackTrace();
         when {
             error.isExpectedWhenStartingNode() -> error.logAsExpected()
             error is CouldNotCreateDataSourceException -> error.logAsUnexpected()
