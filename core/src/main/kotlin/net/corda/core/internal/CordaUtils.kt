@@ -11,7 +11,6 @@ import net.corda.core.node.ZoneVersionTooLowException
 import net.corda.core.node.services.AttachmentStorage
 import net.corda.core.node.services.vault.AttachmentQueryCriteria
 import net.corda.core.node.services.vault.AttachmentSort
-import net.corda.core.node.services.vault.Builder
 import net.corda.core.node.services.vault.Sort
 import net.corda.core.serialization.CordaSerializable
 import net.corda.core.serialization.SerializationContext
@@ -125,15 +124,28 @@ fun noPackageOverlap(packages: Collection<String>): Boolean {
  *
  * TODO: Should throw when the class is found in multiple contract attachments (not different versions).
  */
-fun AttachmentStorage.internalFindTrustedAttachmentForClass(className: String): ContractAttachment?{
+fun AttachmentStorage.internalFindTrustedAttachmentForClass(className1: String): ContractAttachment?{
+    // FIXME remo: disabled .withUploader(Builder.`in`(TRUSTED_UPLOADERS)) till signing in place
     val allTrusted = queryAttachments(
-            AttachmentQueryCriteria.AttachmentsQueryCriteria().withUploader(Builder.`in`(TRUSTED_UPLOADERS)),
+            AttachmentQueryCriteria.AttachmentsQueryCriteria(),
             AttachmentSort(listOf(AttachmentSort.AttachmentSortColumn(AttachmentSort.AttachmentSortAttribute.VERSION, Sort.Direction.DESC))))
 
     // TODO - add caching if performance is affected.
+
+    val sep = className1.lastIndexOf("->")
+    var className = if(sep != -1) className1.substring(sep + 2).trim() else className1
+
     for (attId in allTrusted) {
         val attch = openAttachment(attId)!!
-        if (attch is ContractAttachment && attch.openAsJAR().use { hasFile(it, "$className.class") }) return attch
+
+        IllegalStateException().printStackTrace()
+
+        if (attch is ContractAttachment){
+            val jar = attch.openAsJAR()
+            if( jar.use { hasFile(it, "$className.class") }){
+                return attch
+            }
+        }
     }
     return null
 }

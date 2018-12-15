@@ -234,7 +234,8 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
                 Fiber.sleep(Duration.ofSeconds(10).toMillis()) // To allow async logger to flush.
                 Runtime.getRuntime().halt(1)
             }
-            logger.info("Flow raised an error... sending it to flow hospital", t)
+            logger.error("Flow raised an error... sending it to flow hospital", t)
+            t.printStackTrace(); // FIXME remo
             Try.Failure<R>(t)
         }
         val softLocksId = if (hasSoftLockedStates) logic.runId.uuid else null
