@@ -145,8 +145,7 @@ open class Node(configuration: NodeConfiguration,
         fun isInvalidJavaVersion(): Boolean {
             if (!hasMinimumJavaVersion()) {
                 println("You are using a version of Java that is not supported (${SystemUtils.JAVA_VERSION}). Please upgrade to the latest version of Java 8.")
-                println("Corda will now exit...")
-                return true
+                return false
             }
             return false
         }
