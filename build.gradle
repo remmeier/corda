@@ -68,7 +68,8 @@ buildscript {
     ext.proguard_version = constants.getProperty('proguardVersion')
     ext.jsch_version = '0.1.54'
     ext.commons_cli_version = '1.4'
-    ext.protonj_version = '0.27.1' // This is now aligned with the Artemis version, but retaining in case we ever need to diverge again for a bug fix.
+    ext.protonj_version = '0.27.1'
+    // This is now aligned with the Artemis version, but retaining in case we ever need to diverge again for a bug fix.
     ext.snappy_version = '0.4'
     ext.class_graph_version = '4.6.12'
     ext.jcabi_manifests_version = '1.1'
@@ -97,7 +98,7 @@ buildscript {
     dependencies {
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath "org.jetbrains.kotlin:kotlin-allopen:$kotlin_version"
-        classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.4'
+        classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.8.4'
         classpath "net.corda.plugins:publish-utils:$gradle_plugins_version"
         classpath "net.corda.plugins:quasar-utils:$gradle_plugins_version"
         classpath "net.corda.plugins:cordformation:$gradle_plugins_version"
@@ -346,7 +347,7 @@ bintrayConfig {
     user = System.getenv('CORDA_BINTRAY_USER')
     key = System.getenv('CORDA_BINTRAY_KEY')
     repo = 'corda'
-    org = 'r3'
+    org = 'rmee'
     licenses = ['Apache-2.0']
     vcsUrl = 'https://github.com/corda/corda'
     projectUrl = 'https://github.com/corda/corda'
@@ -424,6 +425,87 @@ artifactory {
         }
     }
 }
+
+allprojects {
+    it.afterEvaluate {
+        if (it.extensions.findByName("bintray") != null) {
+            bintray {
+                pkg {
+                    vcsUrl = 'https://github.com/rmee/boot.git'
+                    websiteUrl = 'http://www.github.com/rmee/boot/'
+                }
+            }
+        }
+    }
+
+    def published = [':mock',
+                     ':rpc',
+                     ':core',
+                     ':core-deterministic',
+                     ':corda',
+                     ':client:rpc',
+                     ':client:mock',
+                     ':client:jackson',
+                     ':node:capsule',
+                     ':node',
+                     ':node-api',
+                     ':testing:test-common',
+                     ':test-utils',
+                     ':test-common',
+                     ':node-driver',
+                     ':confidential-identities',
+                     ':serialization',
+                     ':serialization-deterministic',
+                     //':shell',
+                     // ':deterministic-verifier',
+                     ':finance:workflows',
+                     ':finance:contracts',
+                     //':tools:shell-cli',
+                     //':tools:blob-inspector',
+                     //':tools:explorer',
+                     //':tools:network-bootstrapper',
+                     ':tools:cliutils',
+                     ':tools:shell',
+                     ':common-configuration-parsing',
+                     ':common-validation']
+
+    if(!published.contains(it.path)){
+        System.out.println("not published " + path)
+    }else {
+        System.out.println("published " + path)
+
+        def homeProperties = new Properties()
+        def homePropertiesFile = new File(gradle.gradleUserHomeDir, 'gradle.properties')
+        if (homePropertiesFile.exists()) {
+            // quick hack to allow reading properties from ~/.gradle/gradle.properties
+            // usually this is only possible after the settings.gradle
+            homePropertiesFile.withInputStream {
+                homeProperties.load(it)
+            }
+        }
+
+        apply plugin: 'maven-publish'
+        publishing {
+            repositories {
+                maven {
+                    // https://gitlab.com/help/user/project/packages/maven_repository.md
+                    // https://stackoverflow.com/questions/51137958/gitlab-ci-secret-variables-for-gradle-publish
+                    url = 'https://hub.cardossier.net/api/v4/projects/1/packages/maven'
+                    credentials(HttpHeaderCredentials) {
+                        name = "Private-Token"
+                        value = System.getenv('SB4B_REPOSITORY_TOKEN') ?: homeProperties.getProperty('SB4B_REPOSITORY_TOKEN')
+                    }
+                    authentication {
+                        header(HttpHeaderAuthentication)
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
 
 task generateApi(type: net.corda.plugins.GenerateApi) {
     baseName = "api-corda"

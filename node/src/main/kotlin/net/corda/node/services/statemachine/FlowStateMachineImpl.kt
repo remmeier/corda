@@ -243,7 +243,8 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
             if(t.isUnrecoverable()) {
                 errorAndTerminate("Caught unrecoverable error from flow. Forcibly terminating the JVM, this might leave resources open, and most likely will.", t)
             }
-            logger.info("Flow raised an error... sending it to flow hospital", t)
+            logger.error("Flow raised an error... sending it to flow hospital", t)
+            t.printStackTrace(); // FIXME remo
             Try.Failure<R>(t)
         }
         val softLocksId = if (hasSoftLockedStates) logic.runId.uuid else null
