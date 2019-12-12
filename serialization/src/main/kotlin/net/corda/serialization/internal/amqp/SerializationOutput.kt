@@ -6,6 +6,7 @@ import net.corda.core.serialization.SerializedBytes
 import net.corda.core.utilities.contextLogger
 import net.corda.serialization.internal.CordaSerializationEncoding
 import net.corda.serialization.internal.SectionId
+import net.corda.serialization.internal.SerializationContextImpl
 import net.corda.serialization.internal.byteArrayOutput
 import net.corda.serialization.internal.model.TypeIdentifier
 import org.apache.qpid.proton.codec.Data
@@ -13,6 +14,7 @@ import java.io.NotSerializableException
 import java.io.OutputStream
 import java.lang.reflect.Type
 import java.lang.reflect.WildcardType
+import java.nio.ByteBuffer
 import java.util.*
 import kotlin.collections.LinkedHashSet
 
@@ -34,6 +36,8 @@ open class SerializationOutput constructor(
 ) {
     companion object {
         private val logger = contextLogger()
+
+        var optimized = true
     }
 
     private val objectHistory: MutableMap<Any, Int> = IdentityHashMap()
@@ -76,16 +80,42 @@ open class SerializationOutput constructor(
         schemaHistory.clear()
     }
 
+
     internal fun <T : Any> _serialize(obj: T, context: SerializationContext): SerializedBytes<T> {
+        val opt = _serialize(obj, context, true)
+
+        var verify = System.getProperty("sb4b.corda.node.verifyOptimizations")?.toBoolean() ?: false
+        if(verify) {
+            andFinally()
+            val unopt = _serialize(obj, context, false)
+            if (opt.size != unopt.size) {
+                throw java.lang.IllegalStateException()
+            }
+            for (x in 0 until opt.size) {
+                if (opt.bytes[opt.offset + x] != unopt.bytes[unopt.offset + x]) {
+                    throw java.lang.IllegalStateException()
+                }
+            }
+        }
+
+        return opt;
+    }
+
+    internal fun <T : Any> _serialize(obj: T, context: SerializationContext, optimize: Boolean): SerializedBytes<T> {
         val data = Data.Factory.create()
         data.withDescribed(Envelope.DESCRIPTOR_OBJECT) {
             withList {
                 writeObject(obj, this, context)
                 val schema = Schema(schemaHistory.toList())
-                writeSchema(schema, this)
-                writeTransformSchema(TransformsSchema.build(schema, serializerFactory), this)
+                var transformedSchema = TransformsSchema.build(schema, serializerFactory)
+                if(optimize && transformedSchema.types.isNotEmpty()){
+                    throw IllegalStateException("schema transformations not yet supported when serialization optimizations are applied")
+                }
+                writeSchema(schema, this, context, optimize)
+                writeTransformSchema(transformedSchema, this)
             }
         }
+
         return SerializedBytes(byteArrayOutput {
             var stream: OutputStream = it
             try {
@@ -97,7 +127,72 @@ open class SerializationOutput constructor(
                     stream = encoding.wrap(stream)
                 }
                 SectionId.DATA_AND_STOP.writeTo(stream)
-                stream.alsoAsByteBuffer(data.encodedSize().toInt(), data::encode)
+
+                if(optimize){
+                    val encode = data.encode()
+                    val encodeBuffer = encode.asByteBuffer()
+
+                    var contextImpl = context as SerializationContextImpl
+                    val schemaBinary = contextImpl.serializeSchema(Schema(schemaHistory.toList()))
+
+                    val emptyTransformLength = 13
+                    val placeHolderLength = 10
+
+                    // see ListElement in proton
+                    var listTypeOffset = 10;
+                    var listSize : Int
+
+                    encodeBuffer.position(listTypeOffset)
+                    var listType = encodeBuffer.get()
+                    if(listType == 0x45.toByte()){
+                        throw java.lang.IllegalStateException("empty list not implemented")
+                    }else if(listType == 0xc0.toByte()) {
+                        listSize = encodeBuffer.get().toInt().and(255) - 1
+                        if(encodeBuffer.get() != 3.toByte()) throw java.lang.IllegalStateException("unknown envelop")
+                    }else if(listType == 0xd0.toByte()){
+                        listSize =  encodeBuffer.int - 4
+                        if(encodeBuffer.int != 3) throw java.lang.IllegalStateException("unknown envelop")
+                    }else {
+                        throw java.lang.IllegalStateException("unknown list type")
+                    }
+
+                    // write header
+                    stream.write(encode.array, encode.arrayOffset, listTypeOffset)
+
+                    // write list size
+                    var newListSize = listSize - placeHolderLength + schemaBinary.length
+                    if(newListSize <= 254){
+                        stream.write(0xc0)
+                        stream.write(newListSize + 1)
+                        stream.write(3)
+                    }else{
+                        // list type
+                        stream.write(0xd0)
+
+                        // write list length as int
+                        stream.write(ByteBuffer.allocate(4).putInt(newListSize + 4).array())
+
+                        // write count=3 for [data, schema, transform]
+                        stream.write(0)
+                        stream.write(0)
+                        stream.write(0)
+                        stream.write(3)
+                    }
+
+                    // write data
+                    var placeHolderMagic = 13.toByte()
+                    val dataLength = encode.length - emptyTransformLength - placeHolderLength - encodeBuffer.position()
+                    if(encode.array[encode.arrayOffset + encode.length - emptyTransformLength - placeHolderLength] != placeHolderMagic)
+                    stream.write(encode.array, encode.arrayOffset + encodeBuffer.position(), dataLength)
+
+                    // write schema
+                    stream.write(schemaBinary.array, schemaBinary.arrayOffset, schemaBinary.length)
+
+                    // write transform
+                    stream.write(encode.array, encode.arrayOffset + encode.length - emptyTransformLength, emptyTransformLength)
+                }else {
+                    stream.alsoAsByteBuffer(data.encodedSize().toInt(), data::encode)
+                }
             } finally {
                 stream.close()
             }
@@ -108,8 +203,16 @@ open class SerializationOutput constructor(
         writeObject(obj, data, obj.javaClass, context)
     }
 
-    open fun writeSchema(schema: Schema, data: Data) {
-        data.putObject(schema)
+
+
+
+    open fun writeSchema(schema: Schema, data: Data, context: SerializationContext, optimize: Boolean) {
+        if(optimize){
+            var placeholder = byteArrayOf(0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11)
+            data.putBinary(placeholder)
+        }else {
+            data.putObject(schema)
+        }
     }
 
     open fun writeTransformSchema(transformsSchema: TransformsSchema, data: Data) {

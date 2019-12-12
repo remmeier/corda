@@ -9,8 +9,7 @@ import org.apache.qpid.proton.amqp.UnsignedInteger
 import org.apache.qpid.proton.amqp.UnsignedLong
 import org.apache.qpid.proton.codec.DescribedTypeConstructor
 import java.io.NotSerializableException
-import net.corda.serialization.internal.carpenter.Field as CarpenterField
-import net.corda.serialization.internal.carpenter.Schema as CarpenterSchema
+import java.security.MessageDigest
 
 const val DESCRIPTOR_DOMAIN: String = "net.corda"
 val amqpMagic = CordaSerializationMagic("corda".toByteArray() + byteArrayOf(1, 0))
@@ -155,6 +154,14 @@ sealed class TypeNotation : DescribedType {
     abstract val label: String?
     abstract val provides: List<String>
     abstract val descriptor: Descriptor
+
+    val id: ByteArray by lazy {
+        hashString(toString())
+    }
+}
+
+private fun hashString(input: String): ByteArray {
+    return MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
 }
 
 @KeepForDJVM
