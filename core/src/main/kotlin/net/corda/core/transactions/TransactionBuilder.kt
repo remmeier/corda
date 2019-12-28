@@ -163,12 +163,11 @@ open class TransactionBuilder(
         // This is a workaround as the current version of Corda does not support cordapp dependencies.
         // It works by running transaction validation and then scan the attachment storage for missing classes.
         // TODO - remove once proper support for cordapp dependencies is added.
-        val addedDependency = addMissingDependency(services, wireTx)
-
-        return if (addedDependency)
-            toWireTransactionWithContext(services, serializationContext)
-        else
-            wireTx
+        //val addedDependency = addMissingDependency(services, wireTx)
+        //return if (addedDependency)
+        //    toWireTransactionWithContext(services, serializationContext)
+        //else
+        return wireTx
     }
 
     // Returns the first exception in the hierarchy that matches one of the [types].

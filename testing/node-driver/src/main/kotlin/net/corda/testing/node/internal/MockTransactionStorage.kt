@@ -49,6 +49,10 @@ open class MockTransactionStorage : WritableTransactionStorage, SingletonSeriali
         }
     }
 
+    override fun addTransactions(transactions: Iterable<SignedTransaction>): Pair<List<SignedTransaction>, List<SignedTransaction>> {
+        return transactions.partition { addTransaction(it) }
+    }
+
     override fun addUnverifiedTransaction(transaction: SignedTransaction) {
         txns.putIfAbsent(transaction.id, TxHolder(transaction, isVerified = false))
     }

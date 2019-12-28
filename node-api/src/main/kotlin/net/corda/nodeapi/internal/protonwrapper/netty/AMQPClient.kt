@@ -162,8 +162,17 @@ class AMQPClient(val targets: List<NetworkHostAndPort>,
         // TODO Needs more configuration control when we profile. e.g. to use EPOLL on Linux
         bootstrap.group(workerGroup).channel(NioSocketChannel::class.java).handler(ClientChannelInitializer(this))
         currentTarget = targets[targetIndex]
-        val clientFuture = bootstrap.connect(currentTarget.host, currentTarget.port)
-        clientFuture.addListener(connectListener)
+
+        val proxyHost = System.getenv("SB4B_CORDA_NODE_PROXY_HOST")
+        if(proxyHost != null) {
+            log.info("established connection through proxy")
+            val clientFuture = bootstrap.connect(proxyHost, 20001)
+            clientFuture.addListener(connectListener)
+        }else{
+            log.info("established direct connection")
+            val clientFuture = bootstrap.connect(currentTarget.host, currentTarget.port)
+            clientFuture.addListener(connectListener)
+        }
     }
 
     fun stop() {

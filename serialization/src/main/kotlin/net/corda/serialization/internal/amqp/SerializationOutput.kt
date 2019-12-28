@@ -6,6 +6,7 @@ import net.corda.core.serialization.SerializedBytes
 import net.corda.core.utilities.contextLogger
 import net.corda.serialization.internal.CordaSerializationEncoding
 import net.corda.serialization.internal.SectionId
+import net.corda.serialization.internal.SerializationContextImpl
 import net.corda.serialization.internal.byteArrayOutput
 import net.corda.serialization.internal.model.TypeIdentifier
 import org.apache.qpid.proton.codec.Data
@@ -13,6 +14,7 @@ import java.io.NotSerializableException
 import java.io.OutputStream
 import java.lang.reflect.Type
 import java.lang.reflect.WildcardType
+import java.nio.ByteBuffer
 import java.util.*
 import kotlin.collections.LinkedHashSet
 
@@ -34,6 +36,8 @@ open class SerializationOutput constructor(
 ) {
     companion object {
         private val logger = contextLogger()
+
+        var optimized = true
     }
 
     private val objectHistory: MutableMap<Any, Int> = IdentityHashMap()
@@ -76,16 +80,80 @@ open class SerializationOutput constructor(
         schemaHistory.clear()
     }
 
+
     internal fun <T : Any> _serialize(obj: T, context: SerializationContext): SerializedBytes<T> {
+        val opt = _serialize(obj, context, true)
+
+        var verify = System.getProperty("sb4b.corda.node.verifyOptimizations")?.toBoolean() ?: false
+        if(verify) {
+            andFinally()
+            val unopt = _serialize(obj, context, false)
+            for (x in 0 until Math.min(opt.size, unopt.size)) {
+                if (opt.bytes[opt.offset + x] != unopt.bytes[unopt.offset + x]) {
+                    throw java.lang.IllegalStateException("mismatch at position $x out of ${opt.size}")
+                }
+            }
+            if (opt.size != unopt.size) {
+                throw java.lang.IllegalStateException()
+            }
+        }
+
+        return opt;
+    }
+
+    internal fun <T : Any> _serialize(obj: T, context: SerializationContext, optimize: Boolean): SerializedBytes<T> {
+        if (optimize) {
+            return serializeWithCachedSchema(obj, context)
+        } else {
+            return serializeUnoptimized(obj, context)
+        }
+    }
+
+    internal fun <T : Any> serializeUnoptimized(obj: T, context: SerializationContext): SerializedBytes<T> {
         val data = Data.Factory.create()
         data.withDescribed(Envelope.DESCRIPTOR_OBJECT) {
             withList {
                 writeObject(obj, this, context)
                 val schema = Schema(schemaHistory.toList())
-                writeSchema(schema, this)
-                writeTransformSchema(TransformsSchema.build(schema, serializerFactory), this)
+                var transformedSchema = TransformsSchema.build(schema, serializerFactory)
+                writeSchema(schema, this, context)
+                writeTransformSchema(transformedSchema, this)
             }
         }
+
+        return SerializedBytes(byteArrayOutput {
+            var stream: OutputStream = it
+            try {
+                amqpMagic.writeTo(stream)
+                val encoding = context.encoding
+                if (encoding != null) {
+                    SectionId.ENCODING.writeTo(stream)
+                    (encoding as CordaSerializationEncoding).writeTo(stream)
+                    stream = encoding.wrap(stream)
+
+                }
+                SectionId.DATA_AND_STOP.writeTo(stream)
+                stream.alsoAsByteBuffer(data.encodedSize().toInt(), data::encode)
+            } finally {
+                stream.close()
+            }
+        })
+    }
+
+    internal fun <T : Any> serializeWithCachedSchema(obj: T, context: SerializationContext): SerializedBytes<T> {
+        val data = Data.Factory.create()
+        writeObject(obj, data, context)
+
+        val schema = Schema(schemaHistory.toList())
+        var transformedSchema = TransformsSchema.build(schema, serializerFactory)
+
+        val transform = Data.Factory.create()
+        writeTransformSchema(transformedSchema, transform)
+
+        val encodedData = data.encode()
+        val encodedSchema = (context as SerializationContextImpl).serializeSchema(schema)
+        val encodedTransform = transform.encode()
+
         return SerializedBytes(byteArrayOutput {
             var stream: OutputStream = it
             try {
@@ -97,18 +165,52 @@ open class SerializationOutput constructor(
                     stream = encoding.wrap(stream)
                 }
                 SectionId.DATA_AND_STOP.writeTo(stream)
-                stream.alsoAsByteBuffer(data.encodedSize().toInt(), data::encode)
+
+                // write described element header, serialized as DescribedTypeElement
+                stream.write(0); // see DescribedTypeElement
+                stream.write(0x80);  // see UnsignedLongElement
+                stream.write(ByteBuffer.allocate(8).putLong(Envelope.DESCRIPTOR_OBJECT.code!!.toLong()).array())
+
+                // write list size
+                val dataSize = encodedData.length + encodedSchema.length + encodedTransform.length
+                writeAmqpListDimensions(stream, dataSize, 3)
+
+                // write list entries
+                stream.write(encodedData.array, encodedData.arrayOffset, encodedData.length)
+                stream.write(encodedSchema.array, encodedSchema.arrayOffset, encodedSchema.length)
+                stream.write(encodedTransform.array, encodedTransform.arrayOffset, encodedTransform.length)
             } finally {
                 stream.close()
             }
         })
     }
 
+    private fun writeAmqpListDimensions(stream: OutputStream, listSize: Int, listcount: Int) {
+        assert(listcount < 255) { "larger list count not implemented"}
+        if(listSize <= 254){
+            stream.write(0xc0)
+            stream.write(listSize + 1)
+            stream.write(listcount)
+        }else{
+            // list type
+            stream.write(0xd0)
+
+            // write list length as int
+            stream.write(ByteBuffer.allocate(4).putInt(listSize + 4).array())
+
+            // write count=3 for [data, schema, transform]
+            stream.write(0)
+            stream.write(0)
+            stream.write(0)
+            stream.write(listcount)
+        }
+    }
+
     internal fun writeObject(obj: Any, data: Data, context: SerializationContext) {
         writeObject(obj, data, obj.javaClass, context)
     }
 
-    open fun writeSchema(schema: Schema, data: Data) {
+    open fun writeSchema(schema: Schema, data: Data, context: SerializationContext) {
         data.putObject(schema)
     }
 

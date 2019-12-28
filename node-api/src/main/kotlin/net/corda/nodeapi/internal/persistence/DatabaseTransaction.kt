@@ -6,7 +6,7 @@ import org.hibernate.Session
 import org.hibernate.Transaction
 import rx.subjects.PublishSubject
 import java.sql.Connection
-import java.util.UUID
+import java.util.*
 import javax.persistence.EntityManager
 
 fun currentDBSession(): Session = contextTransaction.session

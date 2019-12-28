@@ -1242,7 +1242,7 @@ fun createCordaPersistence(databaseConfig: DatabaseConfig,
     org.hibernate.type.descriptor.java.JavaTypeDescriptorRegistry.INSTANCE.addDescriptor(AbstractPartyDescriptor(wellKnownPartyFromX500Name, wellKnownPartyFromAnonymous))
     val attributeConverters = listOf(PublicKeyToTextConverter(), AbstractPartyToX500NameAsStringConverter(wellKnownPartyFromX500Name, wellKnownPartyFromAnonymous))
 
-    val jdbcUrl = hikariProperties.getProperty("dataSource.url", "")
+    val jdbcUrl = hikariProperties.getProperty("dataSource.url", hikariProperties.getProperty("jdbcUrl", ""))
     return CordaPersistence(
             databaseConfig,
             schemaService.schemaOptions.keys,

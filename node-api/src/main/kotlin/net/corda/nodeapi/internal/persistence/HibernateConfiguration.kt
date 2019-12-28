@@ -90,6 +90,9 @@ class HibernateConfiguration(
                 .setProperty("hibernate.format_sql", "true")
                 .setProperty("hibernate.hbm2ddl.auto", hbm2dll)
                 .setProperty("javax.persistence.validation.mode", "none")
+                //.setProperty("hibernate.jdbc.batch_size", "50")
+                //.setProperty("hibernate.order_inserts", "true")
+                //.setProperty("hibernate.order_updates", "true")
                 .setProperty("hibernate.connection.isolation", databaseConfig.transactionIsolationLevel.jdbcValue.toString())
 
         schemas.forEach { schema ->

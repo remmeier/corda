@@ -20,12 +20,16 @@ import java.time.Instant
 class MockNetworkParametersStorage(private var currentParameters: NetworkParameters = testNetworkParameters(modifiedTime = Instant.MIN)) : NetworkParametersStorage {
     private val hashToParametersMap: HashMap<SecureHash, NetworkParameters> = HashMap()
     private val hashToSignedParametersMap: HashMap<SecureHash, SignedNetworkParameters> = HashMap()
+
+    private var cachedHash: SecureHash? = null
+
     init {
         storeCurrentParameters()
     }
 
     fun setCurrentParametersUnverified(networkParameters: NetworkParameters) {
         currentParameters = networkParameters
+        cachedHash = null
         storeCurrentParameters()
     }
 
@@ -39,10 +43,14 @@ class MockNetworkParametersStorage(private var currentParameters: NetworkParamet
 
     override fun hasParameters(hash: SecureHash): Boolean = hash in hashToParametersMap
 
+
     override val currentHash: SecureHash
         get() {
             return withTestSerializationEnvIfNotSet {
-                currentParameters.serialize().hash
+                if(cachedHash == null) {
+                    cachedHash = currentParameters.serialize().hash
+                }
+                cachedHash as SecureHash
             }
         }
     override val defaultHash: SecureHash get() = currentHash

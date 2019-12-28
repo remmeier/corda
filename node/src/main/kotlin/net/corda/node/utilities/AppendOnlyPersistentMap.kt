@@ -185,6 +185,48 @@ abstract class AppendOnlyPersistentMapBase<K, V, E, out EK>(
         }
     }
 
+    fun addOrUpdateAll(map: Map<K, V>, updateFn: (K, V, Optional<E>) -> Boolean): Set<K> {
+        val session = currentDBSession()
+
+        // prefetch any unknown key to avoid many repeated request/responses
+        // prefetching is used here to avoid modifying the entire class
+        // note that prefetching currently does not cover corner cases, one would have
+        // to replicate the logic of set() based on the contents in the cache
+        val prefetchKeys = map.keys - cache.asMap().keys
+        val prefetchCache: Map<K,E> = if (prefetchKeys.isNotEmpty()){
+            val query = session.createQuery("select e from " + persistentEntityClass.name + " e WHERE e.txId IN ?1")
+            query.setParameter(1, prefetchKeys.map(toPersistentEntityKey).toSet())
+            query.resultList.map { session.getIdentifier(it) as K to it as E }.toMap()
+        }else{
+            Collections.emptyMap()
+        }
+
+        val results = HashSet<K>()
+        for((key,value) in map) {
+            val addedOrUpdated = set(key, value, logWarning = false) { k, v ->
+                val prefetchedEntry = if(prefetchKeys.contains(key)) Optional.ofNullable(prefetchCache[key]) else Optional.empty()
+
+                val updated = updateFn(k, v, prefetchedEntry)
+                if (updated) {
+                    // This needs to be null to ensure that set returns true when a value is updated.
+                    null
+                } else {
+                    val existingEntry = if(prefetchedEntry.isPresent) prefetchedEntry.get() else session.find(persistentEntityClass, toPersistentEntityKey(k))
+                    if (existingEntry == null) {
+                        session.save(toPersistentEntity(k, v))
+                        null
+                    } else {
+                        fromPersistentEntity(existingEntry).second
+                    }
+                }
+            }
+            if(addedOrUpdated) {
+                results.add(key)
+            }
+        }
+        return results
+    }
+
     fun putAll(entries: Map<K, V>) {
         entries.forEach {
             set(it.key, it.value)

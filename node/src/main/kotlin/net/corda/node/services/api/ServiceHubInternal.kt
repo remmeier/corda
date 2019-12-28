@@ -5,8 +5,13 @@ import net.corda.core.context.InvocationContext
 import net.corda.core.crypto.SecureHash
 import net.corda.core.flows.FlowLogic
 import net.corda.core.flows.StateMachineRunId
-import net.corda.core.internal.*
+import net.corda.core.internal.FlowStateMachine
+import net.corda.core.internal.NamedCacheFactory
+import net.corda.core.internal.ResolveTransactionsFlow
+import net.corda.core.internal.ServiceHubCoreInternal
+import net.corda.core.internal.TransactionsResolver
 import net.corda.core.internal.concurrent.OpenFuture
+import net.corda.core.internal.dependencies
 import net.corda.core.messaging.DataFeed
 import net.corda.core.messaging.StateMachineTransactionMapping
 import net.corda.core.node.NodeInfo
@@ -79,9 +84,14 @@ interface ServiceHubInternal : ServiceHubCoreInternal {
                 // have been recorded at ONLY_RELEVANT, so there shouldn't be anything to re-record here.
                 val (recordedTransactions, previouslySeenTxs) = if (statesToRecord != StatesToRecord.ALL_VISIBLE) {
                     orderedTxs.filter(validatedTransactions::addTransaction) to emptyList()
+                   // validatedTransactions.addTransactions(orderedTxs).first to emptyList()
+                    // FIXME remo fix and optimize addTransactions
                 } else {
-                    orderedTxs.partition(validatedTransactions::addTransaction)
+                     orderedTxs.partition(validatedTransactions::addTransaction)
+                    // validatedTransactions.addTransactions(orderedTxs)
+                    // FIXME remo fix and optimize addTransactions
                 }
+
                 val stateMachineRunId = FlowStateMachineImpl.currentStateMachine()?.id
                 if (stateMachineRunId != null) {
                     recordedTransactions.forEach {
@@ -249,6 +259,8 @@ interface WritableTransactionStorage : TransactionStorage {
      */
     // TODO: Throw an exception if trying to add a transaction with fewer signatures than an existing entry.
     fun addTransaction(transaction: SignedTransaction): Boolean
+
+    fun addTransactions(transactions: Iterable<SignedTransaction>): Pair<List<SignedTransaction>, List<SignedTransaction>>
 
     /**
      * Add a new *unverified* transaction to the store.

@@ -109,17 +109,17 @@ task jarFilter(type: JarFilterTask) {
     jars predeterminise
     annotations {
         forDelete = [
-            "net.corda.core.DeleteForDJVM"
+                "net.corda.core.DeleteForDJVM"
         ]
         forStub = [
-            "net.corda.core.StubOutForDJVM"
+                "net.corda.core.StubOutForDJVM"
         ]
         forRemove = [
-            "co.paralleluniverse.fibers.Suspendable",
-            "org.hibernate.annotations.Immutable"
+                "co.paralleluniverse.fibers.Suspendable",
+                "org.hibernate.annotations.Immutable"
         ]
         forSanitise = [
-            "net.corda.core.DeleteForDJVM"
+                "net.corda.core.DeleteForDJVM"
         ]
     }
 }
