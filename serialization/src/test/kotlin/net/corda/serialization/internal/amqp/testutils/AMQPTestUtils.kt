@@ -1,13 +1,27 @@
 package net.corda.serialization.internal.amqp.testutils
 
-import net.corda.core.internal.*
+import net.corda.core.internal.copyTo
+import net.corda.core.internal.div
+import net.corda.core.internal.isDirectory
+import net.corda.core.internal.packageName_
+import net.corda.core.internal.toPath
 import net.corda.core.serialization.SerializationContext
 import net.corda.core.serialization.SerializationEncoding
 import net.corda.core.serialization.SerializedBytes
 import net.corda.core.utilities.OpaqueBytes
 import net.corda.serialization.internal.AllWhitelist
 import net.corda.serialization.internal.EmptyWhitelist
-import net.corda.serialization.internal.amqp.*
+import net.corda.serialization.internal.amqp.AMQPSerializer
+import net.corda.serialization.internal.amqp.BytesAndSchemas
+import net.corda.serialization.internal.amqp.DefaultDescriptorBasedSerializerRegistry
+import net.corda.serialization.internal.amqp.DescriptorBasedSerializerRegistry
+import net.corda.serialization.internal.amqp.DeserializationInput
+import net.corda.serialization.internal.amqp.ObjectAndEnvelope
+import net.corda.serialization.internal.amqp.Schema
+import net.corda.serialization.internal.amqp.SerializationOutput
+import net.corda.serialization.internal.amqp.SerializerFactory
+import net.corda.serialization.internal.amqp.SerializerFactoryBuilder
+import net.corda.serialization.internal.amqp.TransformsSchema
 import net.corda.serialization.internal.carpenter.ClassCarpenterImpl
 import org.apache.qpid.proton.codec.Data
 import org.junit.Test
@@ -36,25 +50,25 @@ class TestDescriptorBasedSerializerRegistry : DescriptorBasedSerializerRegistry 
 fun testDefaultFactory(descriptorBasedSerializerRegistry: DescriptorBasedSerializerRegistry =
                                DefaultDescriptorBasedSerializerRegistry()) =
         SerializerFactoryBuilder.build(
-            AllWhitelist,
-            ClassCarpenterImpl(AllWhitelist, ClassLoader.getSystemClassLoader()),
-            descriptorBasedSerializerRegistry = descriptorBasedSerializerRegistry)
+                AllWhitelist,
+                ClassCarpenterImpl(AllWhitelist, ClassLoader.getSystemClassLoader()),
+                descriptorBasedSerializerRegistry = descriptorBasedSerializerRegistry)
 
 @JvmOverloads
 fun testDefaultFactoryNoEvolution(descriptorBasedSerializerRegistry: DescriptorBasedSerializerRegistry =
                                           DefaultDescriptorBasedSerializerRegistry()): SerializerFactory =
-    SerializerFactoryBuilder.build(
-            AllWhitelist,
-            ClassCarpenterImpl(AllWhitelist, ClassLoader.getSystemClassLoader()),
-            descriptorBasedSerializerRegistry = descriptorBasedSerializerRegistry,
-            allowEvolution = false)
+        SerializerFactoryBuilder.build(
+                AllWhitelist,
+                ClassCarpenterImpl(AllWhitelist, ClassLoader.getSystemClassLoader()),
+                descriptorBasedSerializerRegistry = descriptorBasedSerializerRegistry,
+                allowEvolution = false)
 
 @JvmOverloads
 fun testDefaultFactoryWithWhitelist(descriptorBasedSerializerRegistry: DescriptorBasedSerializerRegistry =
                                             DefaultDescriptorBasedSerializerRegistry()) =
         SerializerFactoryBuilder.build(EmptyWhitelist,
-        ClassCarpenterImpl(EmptyWhitelist, ClassLoader.getSystemClassLoader()),
-        descriptorBasedSerializerRegistry = descriptorBasedSerializerRegistry)
+                ClassCarpenterImpl(EmptyWhitelist, ClassLoader.getSystemClassLoader()),
+                descriptorBasedSerializerRegistry = descriptorBasedSerializerRegistry)
 
 class TestSerializationOutput(
         private val verbose: Boolean,
@@ -77,7 +91,7 @@ class TestSerializationOutput(
     @Throws(NotSerializableException::class)
     fun <T : Any> serialize(obj: T): SerializedBytes<T> {
         try {
-            return _serialize(obj, testSerializationContext)
+            return serializeInternal(obj, testSerializationContext)
         } finally {
             andFinally()
         }
@@ -139,7 +153,7 @@ fun <T : Any> SerializationOutput.serializeAndReturnSchema(
 @Throws(NotSerializableException::class)
 fun <T : Any> SerializationOutput.serialize(obj: T, encoding: SerializationEncoding? = null): SerializedBytes<T> {
     try {
-        return _serialize(obj, testSerializationContext.withEncoding(encoding))
+        return serializeInternal(obj, testSerializationContext.withEncoding(encoding))
     } finally {
         andFinally()
     }
