@@ -70,7 +70,7 @@ class DBTransactionStorage(private val database: CordaPersistence, cacheFactory:
 
             @Column(name = "timestamp", nullable = false)
             val timestamp: Instant
-            )
+    )
 
     enum class TransactionStatus {
         UNVERIFIED,
@@ -177,6 +177,8 @@ class DBTransactionStorage(private val database: CordaPersistence, cacheFactory:
     }
 
     override fun addTransaction(transaction: SignedTransaction): Boolean {
+        return addTransactions(listOf(transaction)).second.isEmpty()
+/*
         return database.transaction {
             txStorage.locked {
                 val cachedValue = TxCacheValue(transaction, TransactionStatus.VERIFIED)
@@ -189,15 +191,15 @@ class DBTransactionStorage(private val database: CordaPersistence, cacheFactory:
                     false
                 }
             }
-        }
+        }*/
     }
 
     override fun addTransactions(transactions: Iterable<SignedTransaction>): Pair<List<SignedTransaction>, List<SignedTransaction>> {
         return database.transaction {
             txStorage.locked {
-                val transactionMap = transactions.map{it.id to TxCacheValue(it, TransactionStatus.VERIFIED)}.toMap()
+                val cachedValues = transactions.map{it.id to TxCacheValue(it, TransactionStatus.VERIFIED)}.toMap()
 
-                val addedOrUpdatedIds = addOrUpdateAll(transactionMap) { k, _, prefetched ->
+                val addedOrUpdated = addOrUpdateAll(cachedValues) { k, _, prefetched ->
                     if(!prefetched.isPresent || prefetched.get().status == TransactionStatus.VERIFIED){
                         // nothing to update, either does not yet exist or already verified
                         false
@@ -206,7 +208,7 @@ class DBTransactionStorage(private val database: CordaPersistence, cacheFactory:
                     }
                 }
 
-                val partition = transactions.partition{ addedOrUpdatedIds.contains(it.id) }
+                val partition = transactions.partition{ addedOrUpdated.contains(it.id) }
                 for(transaction in partition.first){
                     logger.debug { "Transaction ${transaction.id} has been recorded as verified" }
                     onNewTx(transaction)

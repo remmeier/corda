@@ -10,10 +10,12 @@ import net.corda.nodeapi.internal.persistence.currentDBSession
 import org.hibernate.Session
 import org.hibernate.internal.SessionImpl
 import java.util.*
+import java.util.Collections.emptyList
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.stream.Stream
+import kotlin.collections.HashSet
 
 /**
  * Implements a caching layer on top of an *append-only* table accessed via Hibernate mapping. Note that if the same key is [set] twice,
@@ -189,35 +191,24 @@ abstract class AppendOnlyPersistentMapBase<K, V, E, out EK>(
         val session = currentDBSession()
 
         // prefetch any unknown key to avoid many repeated request/responses
-        // prefetching is used here to avoid modifying the entire class
+        // prefetching is used here to minimize changes to the entire rather elaborate caching logic
         // note that prefetching currently does not cover corner cases, one would have
         // to replicate the logic of set() based on the contents in the cache
-        val prefetchKeys = map.keys - cache.asMap().keys
-        val prefetchCache: Map<K,E> = if (prefetchKeys.isNotEmpty()){
-            val query = session.createQuery("select e from " + persistentEntityClass.name + " e WHERE e.txId IN ?1")
-            query.setParameter(1, prefetchKeys.map(toPersistentEntityKey).toSet())
-            query.resultList.map { session.getIdentifier(it) as K to it as E }.toMap()
-        }else{
-            Collections.emptyMap()
-        }
+        val prefetchKeys = map.keys
+        val prefetchCache = prefetch(prefetchKeys, session)
 
         val results = HashSet<K>()
         for((key,value) in map) {
             val addedOrUpdated = set(key, value, logWarning = false) { k, v ->
-                val prefetchedEntry = if(prefetchKeys.contains(key)) Optional.ofNullable(prefetchCache[key]) else Optional.empty()
+                val ek = toPersistentEntityKey(k)
+                val prefetchedEntry = Optional.ofNullable(prefetchCache[ek])
 
                 val updated = updateFn(k, v, prefetchedEntry)
                 if (updated) {
                     // This needs to be null to ensure that set returns true when a value is updated.
                     null
                 } else {
-                    val existingEntry = if(prefetchedEntry.isPresent) prefetchedEntry.get() else session.find(persistentEntityClass, toPersistentEntityKey(k))
-                    if (existingEntry == null) {
-                        session.save(toPersistentEntity(k, v))
-                        null
-                    } else {
-                        fromPersistentEntity(existingEntry).second
-                    }
+                    add(session, prefetchedEntry, k, v)
                 }
             }
             if(addedOrUpdated) {
@@ -225,6 +216,27 @@ abstract class AppendOnlyPersistentMapBase<K, V, E, out EK>(
             }
         }
         return results
+    }
+
+    private fun add(session: Session, prefetchedEntry: Optional<E>, k: K, v: V): V? {
+        val existingEntry = if(prefetchedEntry.isPresent) prefetchedEntry.get()
+            else session.find(persistentEntityClass, toPersistentEntityKey(k))
+        return if (existingEntry == null) {
+            session.save(toPersistentEntity(k, v))
+            null
+        } else {
+            fromPersistentEntity(existingEntry).second
+        }
+    }
+
+    private fun prefetch(prefetchKeys: Set<K>, session: Session): Map<EK,E> {
+        return if (prefetchKeys.isNotEmpty()){
+            val query = session.createQuery("select e from " + persistentEntityClass.name + " e WHERE e.txId = ?1")
+            query.setParameter(1, prefetchKeys.map(toPersistentEntityKey).toSet())
+            query.resultList.map { session.getIdentifier(it) as EK to it as E }.toMap()
+        }else{
+            Collections.emptyMap()
+        }
     }
 
     fun putAll(entries: Map<K, V>) {

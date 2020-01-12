@@ -778,11 +778,6 @@ class TwoPartyTradeFlowTests(private val anonymous: Boolean) {
             return true
         }
 
-        override fun addTransactions(transactions: Iterable<SignedTransaction>): Pair<List<SignedTransaction>, List<SignedTransaction>> {
-            transactions.forEach { transaction -> addTransaction(transaction) }
-            return Pair(transactions.toList(), ArrayList())
-        }
-
         override fun addUnverifiedTransaction(transaction: SignedTransaction) {
             database.transaction {
                 delegate.addUnverifiedTransaction(transaction)
