@@ -370,37 +370,11 @@ class NodeVaultService(
         return states
     }
 
-    fun mergeUpdates(updates: List<Vault.Update<ContractState>>): Vault.Update<ContractState> {
-        if(updates.isEmpty()) throw IllegalStateException("cannot be empty")
-        var updateType = updates[0].type
-
-        var combinedConsumed = HashSet<StateAndRef<ContractState>>()
-        var combinedProduced = HashSet<StateAndRef<ContractState>>()
-        var combinedReferenced = HashSet<StateAndRef<ContractState>>()
-
-        for(update in updates){
-            require(update.type == updateType) { "Cannot combine updates of different types" }
-
-            combinedReferenced.addAll(update.references)
-            combinedConsumed.addAll(update.consumed)
-            combinedProduced.addAll(update.produced)
-
-            // The ordering below matters to preserve ordering of consumed/produced Sets when they are insertion order dependent implementations.
-            // val combinedProduced = produced.filter { it !in rhs.consumed }.toSet() + rhs.produced
-        }
-
-        var intersection = combinedProduced.intersect(combinedConsumed)
-        combinedProduced.removeAll(intersection)
-        combinedConsumed.removeAll(intersection)
-
-        return Vault.Update(consumed = combinedConsumed, produced = combinedProduced, references = combinedReferenced)
-    }
-
     private fun processAndNotify(updates: List<Vault.Update<ContractState>>) {
         if (updates.isEmpty()) return
 
-        // val netUpdate = updates.reduce { update1, update2 -> update1 + update2 }
-        val netUpdate = mergeUpdates(updates)
+     //   val netUpdate = updates.reduce { update1, update2 -> update1 + update2 }
+        val netUpdate = Vault.Update.merge(updates)
         if (!netUpdate.isEmpty()) {
             recordUpdate(netUpdate)
             mutex.locked {

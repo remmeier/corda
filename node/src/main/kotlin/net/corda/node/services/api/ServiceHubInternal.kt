@@ -83,13 +83,11 @@ interface ServiceHubInternal : ServiceHubCoreInternal {
                 // for transactions being recorded at ONLY_RELEVANT, if this transaction has been seen before its outputs should already
                 // have been recorded at ONLY_RELEVANT, so there shouldn't be anything to re-record here.
                 val (recordedTransactions, previouslySeenTxs) = if (statesToRecord != StatesToRecord.ALL_VISIBLE) {
-                    orderedTxs.filter(validatedTransactions::addTransaction) to emptyList()
-                   // validatedTransactions.addTransactions(orderedTxs).first to emptyList()
-                    // FIXME remo fix and optimize addTransactions
+                    // orderedTxs.filter(validatedTransactions::addTransaction) to emptyList()
+                    validatedTransactions.addTransactions(orderedTxs).first to emptyList()
                 } else {
-                     orderedTxs.partition(validatedTransactions::addTransaction)
-                    // validatedTransactions.addTransactions(orderedTxs)
-                    // FIXME remo fix and optimize addTransactions
+                    // orderedTxs.partition(validatedTransactions::addTransaction)
+                    validatedTransactions.addTransactions(orderedTxs)
                 }
 
                 val stateMachineRunId = FlowStateMachineImpl.currentStateMachine()?.id
@@ -260,7 +258,16 @@ interface WritableTransactionStorage : TransactionStorage {
     // TODO: Throw an exception if trying to add a transaction with fewer signatures than an existing entry.
     fun addTransaction(transaction: SignedTransaction): Boolean
 
-    fun addTransactions(transactions: Iterable<SignedTransaction>): Pair<List<SignedTransaction>, List<SignedTransaction>>
+    /**
+     * Add a collection of new *verified* transactions to the store, or convert the existing unverified transactions into a verified ones.
+     * This method is optional to implement and by default transactions will be added individually.
+     *
+     * @param transactions The transactions to be recorded.
+     * @return pair of collections holding transactions recorded as *new verified* transactions and already existing transactions
+     */
+    fun addTransactions(transactions: Iterable<SignedTransaction>): Pair<List<SignedTransaction>, List<SignedTransaction>> {
+        return transactions.partition { addTransaction(it) }
+    }
 
     /**
      * Add a new *unverified* transaction to the store.

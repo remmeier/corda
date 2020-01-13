@@ -17,6 +17,7 @@ import java.lang.reflect.WildcardType
 import java.nio.ByteBuffer
 import java.util.*
 import kotlin.collections.LinkedHashSet
+import kotlin.math.min
 
 @KeepForDJVM
 data class BytesAndSchemas<T : Any>(
@@ -37,7 +38,7 @@ open class SerializationOutput constructor(
     companion object {
         private val logger = contextLogger()
 
-        var optimized = true
+        var verify = false
     }
 
     private val objectHistory: MutableMap<Any, Int> = IdentityHashMap()
@@ -52,7 +53,7 @@ open class SerializationOutput constructor(
     @Throws(NotSerializableException::class)
     fun <T : Any> serialize(obj: T, context: SerializationContext): SerializedBytes<T> {
         try {
-            return _serialize(obj, context)
+            return serializeInternal(obj, context)
         } catch (amqp: AMQPNotSerializableException) {
             amqp.log("Serialize", logger)
             throw NotSerializableException(amqp.mitigation)
@@ -66,7 +67,7 @@ open class SerializationOutput constructor(
     @Throws(NotSerializableException::class)
     fun <T : Any> serializeAndReturnSchema(obj: T, context: SerializationContext): BytesAndSchemas<T> {
         try {
-            val blob = _serialize(obj, context)
+            val blob = serializeInternal(obj, context)
             val schema = Schema(schemaHistory.toList())
             return BytesAndSchemas(blob, schema, TransformsSchema.build(schema, serializerFactory))
         } finally {
@@ -80,43 +81,32 @@ open class SerializationOutput constructor(
         schemaHistory.clear()
     }
 
+    internal fun <T : Any> serializeInternal(obj: T, context: SerializationContext): SerializedBytes<T> {
+        val opt = serializeWithCachedSchema(obj, context)
 
-    internal fun <T : Any> _serialize(obj: T, context: SerializationContext): SerializedBytes<T> {
-        val opt = _serialize(obj, context, true)
-
-        var verify = System.getProperty("sb4b.corda.node.verifyOptimizations")?.toBoolean() ?: false
-        if(verify) {
+        if (verify) {
+            // if verification is enabled, it will double check that the optimized serialization produces a valid output
             andFinally()
-            val unopt = _serialize(obj, context, false)
-            for (x in 0 until Math.min(opt.size, unopt.size)) {
-                if (opt.bytes[opt.offset + x] != unopt.bytes[unopt.offset + x]) {
-                    throw java.lang.IllegalStateException("mismatch at position $x out of ${opt.size}")
+            val unopt = serializeUnoptimized(obj, context)
+            for (x in 0 until min(opt.size, unopt.size)) {
+                assert(opt.bytes[opt.offset + x] == unopt.bytes[unopt.offset + x]) {
+                    "serialization mismatch at position $x out of ${opt.size}"
                 }
             }
-            if (opt.size != unopt.size) {
-                throw java.lang.IllegalStateException()
-            }
+            assert(opt.size == unopt.size)
         }
 
         return opt;
     }
 
-    internal fun <T : Any> _serialize(obj: T, context: SerializationContext, optimize: Boolean): SerializedBytes<T> {
-        if (optimize) {
-            return serializeWithCachedSchema(obj, context)
-        } else {
-            return serializeUnoptimized(obj, context)
-        }
-    }
-
-    internal fun <T : Any> serializeUnoptimized(obj: T, context: SerializationContext): SerializedBytes<T> {
+    fun <T : Any> serializeUnoptimized(obj: T, context: SerializationContext): SerializedBytes<T> {
         val data = Data.Factory.create()
         data.withDescribed(Envelope.DESCRIPTOR_OBJECT) {
             withList {
                 writeObject(obj, this, context)
                 val schema = Schema(schemaHistory.toList())
                 var transformedSchema = TransformsSchema.build(schema, serializerFactory)
-                writeSchema(schema, this, context)
+                writeSchema(schema, this)
                 writeTransformSchema(transformedSchema, this)
             }
         }
@@ -130,7 +120,6 @@ open class SerializationOutput constructor(
                     SectionId.ENCODING.writeTo(stream)
                     (encoding as CordaSerializationEncoding).writeTo(stream)
                     stream = encoding.wrap(stream)
-
                 }
                 SectionId.DATA_AND_STOP.writeTo(stream)
                 stream.alsoAsByteBuffer(data.encodedSize().toInt(), data::encode)
@@ -140,7 +129,13 @@ open class SerializationOutput constructor(
         })
     }
 
-    internal fun <T : Any> serializeWithCachedSchema(obj: T, context: SerializationContext): SerializedBytes<T> {
+    /**
+     * Performs optimized serialization by allowing the caching and reuse of the serialized schema. The schema
+     * can take up to 80% to 90% of the data and is equally expensive to serialize. As such it can impact serialization performance
+     * by a factor 10. This method serializes the three building blocks (data, schema, transformation) separately, caches the schema
+     * and combines them together with the necessary Corda/AMQP envelop.
+     */
+    private fun <T : Any> serializeWithCachedSchema(obj: T, context: SerializationContext): SerializedBytes<T> {
         val data = Data.Factory.create()
         writeObject(obj, data, context)
 
@@ -167,8 +162,8 @@ open class SerializationOutput constructor(
                 SectionId.DATA_AND_STOP.writeTo(stream)
 
                 // write described element header, serialized as DescribedTypeElement
-                stream.write(0); // see DescribedTypeElement
-                stream.write(0x80);  // see UnsignedLongElement
+                stream.write(0) // see DescribedTypeElement
+                stream.write(0x80)  // see UnsignedLongElement
                 stream.write(ByteBuffer.allocate(8).putLong(Envelope.DESCRIPTOR_OBJECT.code!!.toLong()).array())
 
                 // write list size
@@ -186,12 +181,12 @@ open class SerializationOutput constructor(
     }
 
     private fun writeAmqpListDimensions(stream: OutputStream, listSize: Int, listcount: Int) {
-        assert(listcount < 255) { "larger list count not implemented"}
-        if(listSize <= 254){
+        assert(listcount < 255) { "larger list count not implemented" }
+        if (listSize <= 254) {
             stream.write(0xc0)
             stream.write(listSize + 1)
             stream.write(listcount)
-        }else{
+        } else {
             // list type
             stream.write(0xd0)
 
@@ -210,7 +205,7 @@ open class SerializationOutput constructor(
         writeObject(obj, data, obj.javaClass, context)
     }
 
-    open fun writeSchema(schema: Schema, data: Data, context: SerializationContext) {
+    open fun writeSchema(schema: Schema, data: Data) {
         data.putObject(schema)
     }
 
@@ -253,7 +248,7 @@ open class SerializationOutput constructor(
 
     internal open fun requireSerializer(type: Type) {
         if (type != Object::class.java && type.typeName != "?") {
-            val resolvedType = when(type) {
+            val resolvedType = when (type) {
                 is WildcardType ->
                     if (type.upperBounds.size == 1) type.upperBounds[0]
                     else throw NotSerializableException("Cannot obtain upper bound for type $type")
@@ -268,4 +263,3 @@ open class SerializationOutput constructor(
         }
     }
 }
-

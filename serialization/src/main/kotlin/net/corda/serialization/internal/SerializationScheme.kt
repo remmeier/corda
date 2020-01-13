@@ -4,7 +4,15 @@ import net.corda.core.DeleteForDJVM
 import net.corda.core.KeepForDJVM
 import net.corda.core.crypto.SecureHash
 import net.corda.core.internal.copyBytes
-import net.corda.core.serialization.*
+import net.corda.core.serialization.ClassWhitelist
+import net.corda.core.serialization.EncodingWhitelist
+import net.corda.core.serialization.ObjectWithCompatibleContext
+import net.corda.core.serialization.SerializationContext
+import net.corda.core.serialization.SerializationCustomSerializer
+import net.corda.core.serialization.SerializationEncoding
+import net.corda.core.serialization.SerializationFactory
+import net.corda.core.serialization.SerializationMagic
+import net.corda.core.serialization.SerializedBytes
 import net.corda.core.utilities.ByteSequence
 import net.corda.serialization.internal.amqp.Schema
 import net.corda.serialization.internal.amqp.amqpMagic
@@ -41,20 +49,20 @@ data class SerializationContextImpl @JvmOverloads constructor(override val prefe
         for(type in schema.types){
             md.update(type.id)
         }
-        return  String(md.digest())
+        return String(md.digest())
     }
 
     fun serializeSchema(schema: Schema): Binary {
         var cacheId = schemaCacheId(schema)
         var schemaBytes = schemaCache[cacheId]
-        if(schemaBytes == null) {
+        return if(schemaBytes == null) {
             val data = Data.Factory.create()
             data.putObject(schema)
             schemaBytes = data.encode()
             schemaCache[cacheId] = schemaBytes
-            return schemaBytes
+            schemaBytes
         }else{
-            return schemaBytes
+            schemaBytes
         }
     }
 
