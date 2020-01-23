@@ -210,7 +210,9 @@ class VaultStateMigrationTest {
                     stateMachineRunId = null,
                     transaction = tx.serialize(context = SerializationDefaults.STORAGE_CONTEXT).bytes,
                     status = DBTransactionStorage.TransactionStatus.VERIFIED,
-                    timestamp = Instant.now()
+                    timestamp = Instant.now(),
+                    schema = null,
+                    signatures = null
             )
             session.save(persistentTx)
         }

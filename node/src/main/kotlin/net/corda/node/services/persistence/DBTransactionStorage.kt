@@ -41,8 +41,11 @@ import javax.persistence.Column
 import javax.persistence.Convert
 import javax.persistence.Converter
 import javax.persistence.Entity
+import javax.persistence.FetchType
 import javax.persistence.Id
+import javax.persistence.JoinColumn
 import javax.persistence.Lob
+import javax.persistence.ManyToOne
 import javax.persistence.Table
 import kotlin.streams.toList
 
@@ -69,7 +72,28 @@ class DBTransactionStorage(private val database: CordaPersistence, cacheFactory:
             val status: TransactionStatus,
 
             @Column(name = "timestamp", nullable = false)
-            val timestamp: Instant
+            val timestamp: Instant,
+
+            @ManyToOne(fetch= FetchType.EAGER)
+            @JoinColumn(name="schema", nullable = true)
+            val schema: DBTransactionSchema?,
+
+            @Lob
+            @Column(name = "signatures", nullable = true)
+            val signatures: ByteArray?
+    )
+
+    @Suppress("MagicNumber") // database column width
+    @Entity
+    @Table(name = "${NODE_DATABASE_PREFIX}transactions_schema")
+    class DBTransactionSchema(
+            @Id
+            @Column(name = "schema_id", length = 64, nullable = false)
+            val schemaId: String,
+
+            @Lob
+            @Column(name = "schema", nullable = false)
+            val schema: ByteArray
     )
 
     enum class TransactionStatus {
@@ -142,9 +166,11 @@ class DBTransactionStorage(private val database: CordaPersistence, cacheFactory:
                         DBTransaction(
                                 txId = key.toString(),
                                 stateMachineRunId = FlowStateMachineImpl.currentStateMachine()?.id?.uuid?.toString(),
-                                transaction = value.toSignedTx().serialize(context = contextToUse().withEncoding(SNAPPY)).bytes,
                                 status = value.status,
-                                timestamp = clock.instant()
+                                timestamp = clock.instant(),
+                                transaction = value.toSignedTx().serialize(context = contextToUse().withEncoding(SNAPPY)).bytes,
+                                schema = null,
+                                signatures = null
                         )
                     },
                     persistentEntityClass = DBTransaction::class.java,
@@ -295,8 +321,13 @@ class DBTransactionStorage(private val database: CordaPersistence, cacheFactory:
         constructor(stx: SignedTransaction, status: TransactionStatus) : this(
                 stx.txBits,
                 Collections.unmodifiableList(stx.sigs),
-                status)
+                status){
+
+            serialize()
+
+        }
 
         fun toSignedTx() = SignedTransaction(txBits, sigs)
+
     }
 }

@@ -107,6 +107,7 @@ object PersistentIdentitiesMigrationSchemaBuilder {
             MappedSchema(schemaFamily = PersistentIdentitiesMigrationSchema.javaClass, version = 1,
                     mappedTypes = listOf(
                             DBTransactionStorage.DBTransaction::class.java,
+                            DBTransactionStorage.DBTransactionSchema::class.java,
                             PersistentIdentityService.PersistentPublicKeyHashToCertificate::class.java,
                             PersistentIdentityService.PersistentPartyToPublicKeyHash::class.java,
                             PersistentIdentityService.PersistentPublicKeyHashToParty::class.java,

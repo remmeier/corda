@@ -29,6 +29,8 @@ abstract class SerializationFactory {
      */
     abstract fun <T : Any> deserialize(byteSequence: ByteSequence, clazz: Class<T>, context: SerializationContext): T
 
+    abstract fun <T : Any> extractElements(byteSequence: ByteSequence): SerializationElements
+
     /**
      * Deserialize the bytes in to an object, using the prefixed bytes to determine the format.
      *
@@ -106,6 +108,22 @@ abstract class SerializationFactory {
 typealias SerializationMagic = ByteSequence
 @DoNotImplement
 interface SerializationEncoding
+
+@KeepForDJVM
+@DoNotImplement
+interface SerializationElements {
+
+    val dataBits: ByteArray
+
+    val schemaBits: ByteArray
+
+    val schemaTransformationBits: ByteArray
+
+    val schemaId: String
+
+}
+
+
 
 /**
  * Parameters to serialization and deserialization.

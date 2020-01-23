@@ -1,5 +1,6 @@
 package net.corda.serialization.internal
 
+import io.netty.buffer.ByteBuf
 import net.corda.core.DeleteForDJVM
 import net.corda.core.KeepForDJVM
 import net.corda.core.crypto.SecureHash
@@ -9,6 +10,7 @@ import net.corda.core.serialization.EncodingWhitelist
 import net.corda.core.serialization.ObjectWithCompatibleContext
 import net.corda.core.serialization.SerializationContext
 import net.corda.core.serialization.SerializationCustomSerializer
+import net.corda.core.serialization.SerializationElements
 import net.corda.core.serialization.SerializationEncoding
 import net.corda.core.serialization.SerializationFactory
 import net.corda.core.serialization.SerializationMagic
@@ -19,7 +21,9 @@ import net.corda.serialization.internal.amqp.amqpMagic
 import org.apache.qpid.proton.amqp.Binary
 import org.apache.qpid.proton.codec.Data
 import org.slf4j.LoggerFactory
+import java.io.InputStream
 import java.io.NotSerializableException
+import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -140,6 +144,101 @@ open class SerializationFactoryImpl(
     @Throws(NotSerializableException::class)
     override fun <T : Any> deserialize(byteSequence: ByteSequence, clazz: Class<T>, context: SerializationContext): T {
         return asCurrent { withCurrentContext(context) { schemeFor(byteSequence, context.useCase).first.deserialize(byteSequence, clazz, context) } }
+    }
+
+    override fun <T : Any> extractElements(byteSequence: ByteSequence): SerializationElements {
+
+        /*
+        var stream: InputStream = ByteArrayInputStream(byteSequence.bytes, byteSequence.offset, byteSequence.size)
+        readHeader(stream)
+        stream = readSectionHeaders(stream)
+        stream.skip(2 + 8) // described element header
+         */
+
+        val buffer = ByteBuffer.wrap(byteSequence.bytes, byteSequence.offset, byteSequence.size)
+        readHeader(buffer)
+        readSectionHeaders(buffer)
+        buffer.position(buffer.position() + 2 + 8) // skip described element header
+
+        val listSize = readRootListSize(buffer)
+
+
+
+
+        /*
+        DateImpl/DataDecoder:
+
+        static int decode(ByteBuffer b, Data data)
+        {
+            if(b.hasRemaining())
+            {
+                int position = b.position();
+                TypeConstructor c = readConstructor(b);
+                final int size = c.size(b);
+                if(b.remaining() >= size)
+                {
+                    c.parse(b, data);
+                    return 1+size;
+                }
+                else
+                {
+                    b.position(position);
+                    return -4;
+                }
+            }
+            return 0;
+        }
+         */
+
+
+
+
+
+        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+    }
+
+    private fun readRootListSize(buffer: ByteBuffer): Int {
+        var listType = buffer.get()
+        if(listType == 0x45.toByte()){
+            throw java.lang.IllegalStateException("empty list not implemented")
+        }else if(listType == 0xc0.toByte()) {
+            val listSize = buffer.get().toInt().and(255) - 1
+            if(buffer.get() != 3.toByte()) throw java.lang.IllegalStateException("unknown envelop")
+            return listSize
+        }else if(listType == 0xd0.toByte()){
+            val listSize =  buffer.int - 4
+            // expecting data, schema and transformation
+            if(buffer.int != 3) throw java.lang.IllegalStateException("unknown envelop")
+        }else {
+            throw java.lang.IllegalStateException("unknown list type")
+        }
+    }
+
+    private fun readSectionHeaders(buffer: ByteBuffer): ByteBuffer {
+        var sectionId = SectionId.values()[buffer.get().toInt()]
+        // var wrappedStream = buffer
+        if(sectionId == SectionId.ENCODING){
+            // var encoding = CordaSerializationEncoding.values()[buffer.get().toInt()]
+            // sectionId = SectionId.values()[buffer.get().toInt()]
+            // wrappedStream = encoding.wrap(buffer)
+            throw java.lang.UnsupportedOperationException("encoding not supported yet")
+        }
+        if(sectionId != SectionId.DATA_AND_STOP) throw java.lang.UnsupportedOperationException("unknown sectionId")
+        return buffer
+    }
+
+    private fun readHeader(buffer: ByteBuffer) {
+        for(i in 0 until amqpMagic.size - 1 ){
+            if(buffer.get() != amqpMagic.bytes[amqpMagic.offset + i]) throw UnsupportedOperationException("header not recognized")
+        }
+    }
+
+    class AmqpSerializationElements(
+            override val dataBits: ByteArray,
+            override val schemaBits: ByteArray,
+            override val schemaTransformationBits: ByteArray,
+            override val schemaId: String) : SerializationElements{
+
     }
 
     @Throws(NotSerializableException::class)

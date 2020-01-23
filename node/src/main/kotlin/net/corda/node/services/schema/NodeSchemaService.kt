@@ -36,6 +36,7 @@ class NodeSchemaService(private val extraSchemas: Set<MappedSchema> = emptySet()
     object NodeCoreV1 : MappedSchema(schemaFamily = NodeCore.javaClass, version = 1,
             mappedTypes = listOf(DBCheckpointStorage.DBCheckpoint::class.java,
                     DBTransactionStorage.DBTransaction::class.java,
+                    DBTransactionStorage.DBTransactionSchema::class.java,
                     BasicHSMKeyManagementService.PersistentKey::class.java,
                     NodeSchedulerService.PersistentScheduledState::class.java,
                     NodeAttachmentService.DBAttachment::class.java,
